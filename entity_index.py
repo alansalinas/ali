@@ -7,6 +7,7 @@ from sentence_transformers.util import cos_sim
 
 from embedder import Embedder
 from typedefs import Entity
+from soup_utils import deduplicate_by_overlap
 
 
 class EntityIndex:
@@ -78,7 +79,7 @@ class EntityIndex:
                     self.entity_names[cid].append(name)
 
                 self.metadata.append(
-                    {'children_only': True if e.get('children-only') else False}
+                    {'children_only': bool(e.get('children-only'))}
                 )
 
                 sub_entities = e.find_all('entity', recursive=False)
@@ -140,6 +141,41 @@ class EntityIndex:
             names += self.entity_names[entity.id]
         return names
 
+    def tag(self, text):
+        tags = self.scan(text)
+        tokens = text.split()
+        output = []
+        current = 0
+        for t in tags:
+            output += tokens[current:t.start_token]
+            output.append(
+                f'<entity id={t.id}, confidence={t.confidence}>{t.text}</entity>'
+            )
+            current = t.end_token
+        output += tokens[current:]
+        return ' '.join(output)
+
+    def scan(self, text, n_tokens=20):
+        tokens = text.split()
+        chunks = [
+            [
+                Entity(
+                    id=e.id,
+                    name=e.name,
+                    text=e.text,
+                    confidence=e.confidence,
+                    start_token=i,
+                    end_token=i+j,
+                )
+                for e in self.search(' '.join(tokens[i:i+j]))
+            ][0]
+            for i in range(len(tokens))
+            for j in range(1, min(n_tokens, len(tokens[i:])) + 1)
+        ]
+
+        chunks = [c for c in chunks if c.confidence >= 0.7]
+        return deduplicate_by_overlap(chunks)
+
     def search(self, query, k=1):
         q_vec = np.array([self.embedder.encode(query.strip())])
         cs = cos_sim(q_vec, self.vectors)[0].numpy()
@@ -150,7 +186,8 @@ class EntityIndex:
         results = [
             Entity(
                 id=entity_idx,
-                name=query,
+                name=self.names[name_idx],
+                text=query,
                 confidence=cs[name_idx],
                 children_only=self.metadata[entity_idx]['children_only'],
             )

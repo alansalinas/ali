@@ -6,7 +6,10 @@ from numpy.typing import NDArray
 class Entity:
     id: int
     name: str
+    text: str
     confidence: float
+    start_token: int = -1
+    end_token: int = 0
     children_only: bool = False
 
 

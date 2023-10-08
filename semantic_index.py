@@ -71,8 +71,9 @@ class SemanticIndex:
         current = 0
         for t in tags:
             output += tokens[current:t.start_token]
+            body = self.entity_index.tag(t.text)
             output.append(
-                f'<topic id={t.id}, confidence={t.confidence}>{t.text}</topic>'
+                f'<topic id={t.id}, confidence={t.confidence}>{body}</topic>'
             )
             current = t.end_token
         output += tokens[current:]
@@ -172,7 +173,7 @@ class SemanticIndex:
         if reverse and b.start_token >= a.start_token and b.end_token <= a.end_token:
             return True
         return False
-    
+
     def overlap(self, a, b):
         tokens_a = set(range(a.start_token, a.end_token))
         tokens_b = set(range(b.start_token, b.end_token))

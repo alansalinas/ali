@@ -5,7 +5,7 @@ from sentence_transformers.util import cos_sim
 
 from embedder import Embedder
 from entity_index import EntityIndex
-from soup_utils import read_documents
+from soup_utils import read_documents, deduplicate_by_overlap
 from typedefs import Topic
 
 
@@ -72,9 +72,7 @@ class SemanticIndex:
         for t in tags:
             output += tokens[current:t.start_token]
             body = self.entity_index.tag(t.text)
-            output.append(
-                f'<topic id={t.id}, confidence={t.confidence}>{body}</topic>'
-            )
+            output.append(f'<topic id={t.id}, confidence={t.confidence}>{body}</topic>')
             current = t.end_token
         output += tokens[current:]
         return ' '.join(output)
@@ -91,16 +89,16 @@ class SemanticIndex:
                     confidence=t.confidence,
                     vector=t.vector,
                     start_token=i,
-                    end_token=i+j,
+                    end_token=i + j,
                 )
-                for t in self.search(' '.join(tokens[i:i+j]))
+                for t in self.search(' '.join(tokens[i:i + j]))
             ][0]
             for i in range(len(tokens))
             for j in range(1, min(n_tokens, len(tokens[i:])) + 1)
         ]
 
         chunks = [c for c in chunks if c.confidence >= 0.7]
-        topics = self.deduplicate_by_overlap(chunks)
+        topics = deduplicate_by_overlap(chunks)
 
         return topics
 
@@ -123,66 +121,6 @@ class SemanticIndex:
                 )
             )
         return sorted(results, key=lambda x: x.confidence, reverse=True)
-
-    def deduplicate_by_within(self, grp):
-        remaining = []
-        a = grp[0]
-        for b in grp[1:]:
-            if self.is_within(a, b, reverse=True):
-                a = max(a, b, key=lambda x: x.confidence)
-            else:
-                remaining.append(b)
-
-        if len(remaining) < 2:
-            return [a] + remaining
-
-        return [a] + self.deduplicate_by_within(remaining)
-
-    def deduplicate_by_overlap(self, grp):
-        remaining = []
-        a = grp[0]
-        for b in grp[1:]:
-            if self.overlap(a, b) > 0:
-                a = max(a, b, key=lambda x: x.confidence)
-            else:
-                remaining.append(b)
-
-        if len(remaining) < 2:
-            return [a] + remaining
-
-        return [a] + self.deduplicate_by_overlap(remaining)
-
-    def deduplicate_by_iou(self, grp):
-        remaining = []
-        a = grp[0]
-        for b in grp[1:]:
-            # TODO efficient iou calculation when we know its already below t
-            if self.iou(a, b) > 0.7:
-                a = max(a, b, key=lambda x: x.confidence)
-            else:
-                remaining.append(b)
-
-        if len(remaining) < 2:
-            return [a] + remaining
-
-        return [a] + self.deduplicate_by_iou(remaining)
-
-    def is_within(self, a, b, reverse=False):
-        if a.start_token >= b.start_token and a.end_token <= b.end_token:
-            return True
-        if reverse and b.start_token >= a.start_token and b.end_token <= a.end_token:
-            return True
-        return False
-
-    def overlap(self, a, b):
-        tokens_a = set(range(a.start_token, a.end_token))
-        tokens_b = set(range(b.start_token, b.end_token))
-        return len(tokens_a.intersection(tokens_b))
-
-    def iou(self, a, b):
-        tokens_a = set(range(a.start_token, a.end_token))
-        tokens_b = set(range(b.start_token, b.end_token))
-        return len(tokens_a.intersection(tokens_b)) / len(tokens_a.union(tokens_b))
 
     def get_all_topics_for_doc(self, doc_idx):
         topics_idxes = np.argwhere(
